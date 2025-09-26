@@ -44,12 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-
 lib/firebase_options.dart
 
 # iOS/MacOS
 ./macos/flutter/GeneratedPluginRegistrant.swift
-
 
 #google-service
 /android/app/google-services.json
@@ -59,3 +57,6 @@ Session.vim
 TsecAppKey.jks
 keystore.jks
 keystore.properties
+
+# FVM Version Cache
+.fvm/
