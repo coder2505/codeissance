@@ -33,8 +33,8 @@ Future<String> getRouteSummary(LatLng start, LatLng end) async {
       url,
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
-        'startCoordinates': {'latitude': start.latitude, 'longitude': start.longitude},
-        'endCoordinates': {'latitude': end.latitude, 'longitude': end.longitude}
+        'startCoordinates': {'lat': start.latitude, 'lng': start.longitude},
+        'endCoordinates': {'lat': end.latitude, 'lng': end.longitude}
       }),
     );
 

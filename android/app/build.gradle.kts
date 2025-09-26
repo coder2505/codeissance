@@ -27,7 +27,7 @@ android {
         applicationId = "com.example.codeissance_project"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 23
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -41,6 +41,20 @@ android {
         }
     }
 }
+
+dependencies {
+    // Add the Sceneform dependency for ARCore
+//    implementation("com.google.ar.sceneform.ux:sceneform-ux:1.17.1")
+    implementation("io.github.sceneview:arsceneview:2.3.0")
+    // Standard Android dependencies
+    implementation("androidx.appcompat:appcompat:1.7.1")
+    implementation("com.google.ar:core:1.50.0")
+    implementation("androidx.constraintlayout:constraintlayout:2.2.1")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+    implementation("com.opencsv:opencsv:5.12.0")
+    implementation("androidx.cardview:cardview:1.0.0")
+}
+
 
 flutter {
     source = "../.."
