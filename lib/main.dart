@@ -41,6 +41,59 @@ class MapSampleState extends State<MapSample> {
   // A custom dark map style
   String? _mapStyle;
 
+  // At the top of your MapSampleState class, add a new Set for your event markers
+  final Set<Marker> _eventMarkers = {};
+
+// 📍 Add this function inside your MapSampleState class
+  Future<void> _loadEventMarkers() async {
+    // Load the JSON string from the asset file
+    final String jsonString = await rootBundle.loadString('assets/events.json');
+    // Decode the JSON string into a Dart object
+    final data = jsonDecode(jsonString);
+
+    // Get the list of events from the parsed JSON
+    final List<dynamic> events = data['events'];
+
+    // Create a temporary set to hold the new markers
+    Set<Marker> markers = {};
+
+    // Loop through each event in the list
+    for (var event in events) {
+      final String eventType = event['type'];
+      double hue; // For marker color
+
+      // Assign a color based on the event type
+      switch (eventType) {
+        case 'food':
+          hue = BitmapDescriptor.hueOrange;
+          break;
+        case 'utility_alert':
+          hue = BitmapDescriptor.hueAzure;
+          break;
+        default:
+          hue = BitmapDescriptor.hueRed;
+      }
+
+      markers.add(
+        Marker(
+          markerId: MarkerId(event['id']),
+          position: LatLng(event['latitude'], event['longitude']),
+          // Use the event name and summary for the info window
+          infoWindow: InfoWindow(
+            title: event['name'],
+            snippet: event['summary'],
+          ),
+          icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        ),
+      );
+    }
+
+    // Update the state to display the new markers on the map
+    setState(() {
+      _eventMarkers.addAll(markers);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +101,7 @@ class MapSampleState extends State<MapSample> {
     rootBundle.loadString('assets/map_style.json').then((string) {
       _mapStyle = string;
     });
+    _loadEventMarkers();
     _determinePosition();
   }
 
@@ -108,7 +162,7 @@ class MapSampleState extends State<MapSample> {
               controller.setMapStyle(_mapStyle);
             },
             polylines: _polylines,
-            markers: _markers,
+            markers: _markers.union(_eventMarkers),
             myLocationEnabled: true,
             myLocationButtonEnabled: false, // We have a custom button
             zoomControlsEnabled: false,

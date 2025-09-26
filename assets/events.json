@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "id": "evt001",
+      "name": "Bandra Food Truck Fiesta",
+      "type": "food",
+      "latitude": 19.0562,
+      "longitude": 72.8433,
+      "startTime": "2025-09-26T18:00:00Z",
+      "endTime": "2025-09-26T23:00:00Z",
+      "summary": "A collection of the city's best food trucks near Bandra Fort."
+    },
+    {
+      "id": "evt002",
+      "name": "Pipeline Repair Work",
+      "type": "utility_alert",
+      "latitude": 19.1186,
+      "longitude": 72.8480,
+      "startTime": "2025-09-26T10:00:00Z",
+      "endTime": "2025-09-27T17:00:00Z",
+      "summary": "MCGM reports major water pipeline work in Andheri West. Expect low water pressure."
+    }
+  ]
+}
