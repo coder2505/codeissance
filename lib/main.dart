@@ -2,10 +2,21 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
+
+import 'http_util.dart';
+
+// A simple class to model a chat message
+class ChatMessage {
+  final String text;
+  final bool isUser;
+
+  ChatMessage({required this.text, required this.isUser});
+}
 
 void main() {
   runApp(const MaterialApp(
@@ -36,16 +47,21 @@ class MapSampleState extends State<MapSample> {
   String? _distance;
   bool _isLoading = false;
 
-  // ✨ NEW: State variables for new context attributes
   String? _selectedGoal;
   DateTime? _deadline;
 
-  final String _apiKey = "YOUR_GOOGLE_MAPS_API_KEY"; // TODO: Add your key
+  final TextEditingController _chatController = TextEditingController();
+  final List<ChatMessage> _messages = [];
+
+  String? _routeSummary; // ✨ NEW: State variable for the summary
+  bool _isSummaryLoading = false; // ✨ NEW: Loading state for the summary
+
+  // TODO: Add your Google Maps API key here
+  final String _apiKey = "AIzaSyBAvUgw3DsmwlzJUXHQ693ClGK7jpsh4Fg";
+
   String? _mapStyle;
   final Set<Marker> _eventMarkers = {};
 
-  // ... (initState, _loadEventMarkers, _determinePosition, _goToCurrentLocation are the same)
-  // ... (Your existing functions go here)
   @override
   void initState() {
     super.initState();
@@ -54,6 +70,36 @@ class MapSampleState extends State<MapSample> {
     });
     _loadEventMarkers();
     _determinePosition();
+  }
+
+  // ✨ NEW: Function to get the route summary from your API
+  Future<String> getRouteSummary(LatLng start, LatLng end) async {
+    var url = Uri.parse('https://rememberingly-unfrugal-lonna.ngrok-free.dev/api/routePlanner');
+    try {
+      var response = await http.post(
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: jsonEncode({
+          'startCoordinates': {'latitude': start.latitude, 'longitude': start.longitude},
+          'endCoordinates': {'latitude': end.latitude, 'longitude': end.longitude}
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        print('Success: ${response.body}');
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        return body["response"] as String? ?? 'No summary field found';
+      } else {
+        print('Request failed with status: ${response.statusCode}.');
+        return 'Error fetching summary: Status ${response.statusCode}';
+      }
+    } catch (e) {
+      print('Error sending request: $e');
+      return 'Error fetching summary: $e';
+    }
   }
 
   Future<void> _loadEventMarkers() async {
@@ -115,8 +161,6 @@ class MapSampleState extends State<MapSample> {
     controller.animateCamera(CameraUpdate.newLatLngZoom(_currentLatLng!, 15));
   }
 
-
-  // ✨ NEW: Function to handle deadline selection
   Future<void> _selectDeadline(BuildContext context) async {
     final DateTime? pickedDate = await showDatePicker(
       context: context,
@@ -143,6 +187,113 @@ class MapSampleState extends State<MapSample> {
     });
   }
 
+  void _showChatBottomSheet() {
+    if (_messages.isEmpty) {
+      _messages.add(ChatMessage(
+          text: "Hi there! How can I help you with your route to ${_searchController.text}?",
+          isUser: false));
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            void handleSendMessage() async {
+              final text = _chatController.text;
+              if (text.isEmpty) return;
+
+              setModalState(() {
+                _messages.add(ChatMessage(text: text, isUser: true));
+              });
+              _chatController.clear();
+
+              final receivedMessage = await postData(text, _currentLatLng!.latitude, _currentLatLng!.longitude);
+
+              setModalState(() {
+                _messages.add(ChatMessage(text: receivedMessage, isUser: false));
+              });
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                height: MediaQuery.of(context).size.height * 0.6,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: _messages.length,
+                        itemBuilder: (context, index) {
+                          final message = _messages[index];
+                          return Align(
+                            alignment: message.isUser
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 5),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: message.isUser
+                                    ? Colors.blue
+                                    : Colors.grey[300],
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                              child: MarkdownBody(
+                                data: message.text,
+                                styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+                                  p: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: message.isUser ? Colors.white : Colors.black,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _chatController,
+                            decoration: InputDecoration(
+                              hintText: "Ask about your route...",
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16),
+                            ),
+                            onSubmitted: (_) => handleSendMessage(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          onPressed: handleSendMessage,
+                          color: Colors.blue,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -154,6 +305,7 @@ class MapSampleState extends State<MapSample> {
               target: LatLng(20.5937, 78.9629),
               zoom: 5,
             ),
+            trafficEnabled: true,
             onMapCreated: (GoogleMapController controller) {
               _controller.complete(controller);
               controller.setMapStyle(_mapStyle);
@@ -164,8 +316,9 @@ class MapSampleState extends State<MapSample> {
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
           ),
-          _buildTopUI(), // ✨ UPDATED: Replaced _buildSearchBar with a more general method
-          if (_eta != null && _distance != null) _buildEtaCard(),
+          _buildTopUI(),
+          // ✨ UPDATED: Replaced _buildEtaCard with a combined info card
+          if (_eta != null) _buildInfoCard(),
           if (_isLoading)
             const Center(
               child: CircularProgressIndicator(),
@@ -173,18 +326,33 @@ class MapSampleState extends State<MapSample> {
         ],
       ),
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 75.0),
-        child: FloatingActionButton(
-          onPressed: _goToCurrentLocation,
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
-          child: const Icon(Icons.my_location),
+        padding: const EdgeInsets.only(bottom: 200.0), // ✨ Adjusted padding
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (_eta != null)
+              FloatingActionButton(
+                onPressed: _showChatBottomSheet,
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                heroTag: 'chat_fab',
+                child: const Icon(Icons.chat_bubble_outline),
+              ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              onPressed: _goToCurrentLocation,
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              heroTag: 'location_fab',
+              child: const Icon(Icons.my_location),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  // ✨ NEW: A general method to build all the top UI elements
   Widget _buildTopUI() {
     return Positioned(
       top: 50,
@@ -197,17 +365,13 @@ class MapSampleState extends State<MapSample> {
           const SizedBox(height: 8),
           _buildGoalChips(),
           const SizedBox(height: 8),
-          _buildAutocompleteList(),
+          if (_suggestions.isNotEmpty) _buildAutocompleteList(),
         ],
       ),
     );
   }
 
-  // ✨ NEW: Extracted autocomplete list into its own builder
   Widget _buildAutocompleteList() {
-    if (_suggestions.isEmpty) {
-      return const SizedBox.shrink();
-    }
     return Material(
       elevation: 8,
       borderRadius: BorderRadius.circular(10),
@@ -222,10 +386,10 @@ class MapSampleState extends State<MapSample> {
             title: Text(s['description']),
             onTap: () {
               _searchController.text = s['description'];
-              _searchAndDrawRoute(s['description']);
               setState(() {
                 _suggestions = [];
               });
+              _searchAndDrawRoute(s['description']);
             },
           );
         },
@@ -233,7 +397,6 @@ class MapSampleState extends State<MapSample> {
     );
   }
 
-  // ✨ UPDATED: Search bar now includes deadline logic
   Widget _buildSearchBarAndDeadline() {
     return Material(
       elevation: 8,
@@ -253,10 +416,10 @@ class MapSampleState extends State<MapSample> {
                 }
               },
               onSubmitted: (value) {
-                _searchAndDrawRoute(value);
                 setState(() {
                   _suggestions = [];
                 });
+                _searchAndDrawRoute(value);
               },
               decoration: InputDecoration(
                 hintText: "Search destination",
@@ -292,7 +455,6 @@ class MapSampleState extends State<MapSample> {
     );
   }
 
-  // ✨ NEW: Widget for Goal Selection Chips
   Widget _buildGoalChips() {
     final goals = ['Commute', 'Explore', 'Errands'];
     return SizedBox(
@@ -309,7 +471,6 @@ class MapSampleState extends State<MapSample> {
                 setState(() {
                   _selectedGoal = selected ? goal : null;
                 });
-                // NOTE: No action is taken here yet, as per request
               },
               selectedColor: Colors.blue[100],
               backgroundColor: Colors.white,
@@ -321,8 +482,8 @@ class MapSampleState extends State<MapSample> {
     );
   }
 
-  // ... (Your other methods like _buildEtaCard, _getAutocomplete, _searchAndDrawRoute, etc. go here)
-  Widget _buildEtaCard() {
+  // ✨ RENAMED & UPDATED: This card now shows summary and ETA
+  Widget _buildInfoCard() {
     return Positioned(
       bottom: 30,
       left: 15,
@@ -332,26 +493,50 @@ class MapSampleState extends State<MapSample> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.timer_outlined, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Text(
-                    _eta ?? "",
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              // Summary Section
+              if (_isSummaryLoading)
+                SizedBox(
+                  height: 50,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8.0),
+                    child: Center(child: CircularProgressIndicator()),
                   ),
-                ],
-              ),
+                ),
+              if (!_isSummaryLoading && _routeSummary != null)
+                SizedBox(
+                  height: 300,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: SingleChildScrollView(child: MarkdownBody(data: _routeSummary!)),
+                  ),
+                ),
+              if (!_isSummaryLoading && _routeSummary != null) const Divider(),
+              // ETA and Distance Section
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  const Icon(Icons.directions_car_outlined, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Text(
-                    _distance ?? "",
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  Row(
+                    children: [
+                      const Icon(Icons.timer_outlined, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      Text(
+                        _eta ?? "",
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const Icon(Icons.directions_car_outlined, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      Text(
+                        _distance ?? "",
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -365,7 +550,7 @@ class MapSampleState extends State<MapSample> {
   Future<void> _getAutocomplete(String input) async {
     if (_apiKey.isEmpty) return;
     final url =
-        "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$input&key=$_apiKey";
+        "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$input&key=$_apiKey&location=${_currentLatLng?.latitude},${_currentLatLng?.longitude}&radius=50000";
     final response = await http.get(Uri.parse(url));
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body);
@@ -376,9 +561,14 @@ class MapSampleState extends State<MapSample> {
   }
 
   Future<void> _searchAndDrawRoute(String destination) async {
+    setState(() {
+      _messages.clear();
+      _routeSummary = null; // ✨ Clear previous summary
+    });
+
     if (_currentLatLng == null || destination.isEmpty || _apiKey.isEmpty) return;
 
-    FocusScope.of(context).unfocus(); // Hide keyboard
+    FocusScope.of(context).unfocus();
     setState(() {
       _isLoading = true;
     });
@@ -411,7 +601,6 @@ class MapSampleState extends State<MapSample> {
             _distance = leg["distance"]["text"];
             _polylines.clear();
             _polylines.add(routePolyline);
-
             _markers.clear();
             _markers.add(Marker(
                 markerId: const MarkerId("start"),
@@ -426,6 +615,16 @@ class MapSampleState extends State<MapSample> {
           final GoogleMapController controller = await _controller.future;
           controller.animateCamera(CameraUpdate.newLatLngBounds(
               _boundsFromLatLngList(points), 70));
+
+          // ✨ Call for the route summary after drawing the route
+          setState(() {
+            _isSummaryLoading = true;
+          });
+          final summary = await getRouteSummary(_currentLatLng!, points.last);
+          setState(() {
+            _routeSummary = summary;
+            _isSummaryLoading = false;
+          });
         }
       }
     } catch (e) {
