@@ -18,6 +18,24 @@ class ChatMessage {
   ChatMessage({required this.text, required this.isUser});
 }
 
+// ✨ NEW: A class to model a nearby place for easier handling
+class NearbyPlace {
+  final String name;
+  final double lat;
+  final double lng;
+
+  NearbyPlace({required this.name, required this.lat, required this.lng});
+
+  factory NearbyPlace.fromJson(Map<String, dynamic> json) {
+    return NearbyPlace(
+      name: json['name'] as String,
+      lat: (json['lat'] as num).toDouble(),
+      lng: (json['lng'] as num).toDouble(),
+    );
+  }
+}
+
+
 void main() {
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
@@ -33,7 +51,6 @@ class MapSample extends StatefulWidget {
 }
 
 class MapSampleState extends State<MapSample> {
-  // ✨ NEW: MethodChannel for AR communication
   static const _arChannel = MethodChannel('ar_navigator_channel');
 
   final Completer<GoogleMapController> _controller =
@@ -59,13 +76,17 @@ class MapSampleState extends State<MapSample> {
   String? _routeSummary;
   bool _isSummaryLoading = false;
 
-  // ✨ NEW: State for real-time navigation tracking
   List<dynamic> _routeSteps = [];
   int _currentStepIndex = 0;
   StreamSubscription<Position>? _positionStreamSubscription;
 
+  // ✨ NEW: State variables for the nearby places feature
+  Map<String, List<NearbyPlace>> _nearbyPlaces = {};
+  bool _isNearbyLoading = false;
+
+
   // TODO: Add your Google Maps API key here
-  final String _apiKey = "AIzaSyBAvUgw3DsmwlzJUXHQ693ClGK7jpsh4Fg";
+  final String _apiKey = "AIzaSyBAvUgw3DsmwlzJUXHQ693ClGK7jpsh4Fg"; // Replace with your key
 
   String? _mapStyle;
   final Set<Marker> _eventMarkers = {};
@@ -80,14 +101,170 @@ class MapSampleState extends State<MapSample> {
     _determinePosition();
   }
 
-  // ✨ NEW: Clean up the location stream when the widget is removed
   @override
   void dispose() {
     _stopLocationUpdates();
     super.dispose();
   }
 
-  // ✨ NEW: Method to launch the native AR Activity
+  // ✨ NEW: Fetches nearby places from your API
+  Future<void> _fetchNearbyPlaces() async {
+    if (_currentLatLng == null) return;
+
+    setState(() {
+      _isNearbyLoading = true;
+      _nearbyPlaces.clear(); // Clear previous results
+    });
+
+    var url = Uri.parse('https://karena-colorational-phylicia.ngrok-free.dev/api/nearby-places');
+    try {
+      var response = await http.post(
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true", // Useful for local dev
+        },
+        body: jsonEncode({
+          'lat': _currentLatLng!.latitude.toString(),
+          'lng': _currentLatLng!.longitude.toString(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final decodedResponse = jsonDecode(response.body) as Map<String, dynamic>;
+        final data = decodedResponse['data']['nearbyPlaces'] as Map<String, dynamic>;
+
+        Map<String, List<NearbyPlace>> fetchedPlaces = {};
+        data.forEach((category, placesList) {
+          if (placesList is List) {
+            fetchedPlaces[category] = placesList
+                .map((placeJson) => NearbyPlace.fromJson(placeJson as Map<String, dynamic>))
+                .toList();
+          }
+        });
+
+        setState(() {
+          _nearbyPlaces = fetchedPlaces;
+        });
+
+      } else {
+        print('Nearby places request failed with status: ${response.statusCode}.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error fetching places: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      print('Error sending nearby places request: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    } finally {
+      setState(() {
+        _isNearbyLoading = false;
+      });
+    }
+  }
+
+  // ✨ NEW: Shows the bottom sheet with nearby places data
+  // ✨ CORRECTED: Shows the bottom sheet with a working filter
+  void _showNearbyPlacesBottomSheet() {
+    if (_isNearbyLoading) {
+      showModalBottomSheet(
+        context: context,
+        builder: (context) => const SizedBox(
+          height: 200,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+      return;
+    }
+
+    if (_nearbyPlaces.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No nearby places found or an error occurred.')),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        // ✨ FIX: State is declared here, outside of the StatefulBuilder's builder method.
+        // This allows its state to persist across rebuilds.
+        String selectedCategory = _nearbyPlaces.keys.first;
+
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.6,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Nearby Places',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  // Category Chips
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _nearbyPlaces.keys.map((category) {
+                        final formattedCategory = category.replaceAll('_', ' ').split(' ').map((e) => e[0].toUpperCase() + e.substring(1)).join(' ');
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                          child: ChoiceChip(
+                            label: Text(formattedCategory),
+                            selected: selectedCategory == category,
+                            onSelected: (isSelected) {
+                              if (isSelected) {
+                                // This now correctly updates the 'selectedCategory'
+                                // variable declared in the outer scope.
+                                setModalState(() {
+                                  selectedCategory = category;
+                                });
+                              }
+                            },
+                            selectedColor: Colors.blue[100],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                  const Divider(height: 24),
+                  // Places List
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: _nearbyPlaces[selectedCategory]?.length ?? 0,
+                      itemBuilder: (context, index) {
+                        final place = _nearbyPlaces[selectedCategory]![index];
+                        return ListTile(
+                          title: Text(place.name),
+                          leading: const Icon(Icons.place_outlined, color: Colors.teal),
+                          onTap: () {
+                            Navigator.pop(context);
+                            _searchController.text = place.name;
+                            _searchAndDrawRoute(place.name);
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+
   Future<void> _launchARNavigator() async {
     try {
       await _arChannel.invokeMethod('launchAR');
@@ -99,7 +276,6 @@ class MapSampleState extends State<MapSample> {
     }
   }
 
-  // ✨ NEW: Method to send data to the native AR Activity
   Future<void> _updateARData(Map<String, dynamic> arData) async {
     try {
       await _arChannel.invokeMethod('updateAR', arData);
@@ -108,44 +284,36 @@ class MapSampleState extends State<MapSample> {
     }
   }
 
-  // ✨ NEW: Starts listening to location changes to update AR
   void _startLocationUpdates() {
-    _stopLocationUpdates(); // Ensure any previous stream is stopped
+    _stopLocationUpdates();
 
     _positionStreamSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 5, // Update every 5 meters moved
+        distanceFilter: 5,
       ),
     ).listen((Position position) {
       if (_routeSteps.isEmpty || _currentStepIndex >= _routeSteps.length) {
-        return; // No route or route finished
+        return;
       }
 
-      // Update current location for other parts of the app
       _currentLatLng = LatLng(position.latitude, position.longitude);
 
       final currentStep = _routeSteps[_currentStepIndex];
       final endLocation = currentStep['end_location'];
       final targetLatLng = LatLng(endLocation['lat'], endLocation['lng']);
 
-      // Calculate distance and bearing to the next turn
       final distanceToNextStep = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
-        targetLatLng.latitude,
-        targetLatLng.longitude,
+        position.latitude, position.longitude,
+        targetLatLng.latitude, targetLatLng.longitude,
       );
 
       final bearingToNextStep = Geolocator.bearingBetween(
-        position.latitude,
-        position.longitude,
-        targetLatLng.latitude,
-        targetLatLng.longitude,
+        position.latitude, position.longitude,
+        targetLatLng.latitude, targetLatLng.longitude,
       );
 
-      // Check if we should advance to the next step
-      if (distanceToNextStep < 20.0) { // 20-meter threshold to advance
+      if (distanceToNextStep < 20.0) {
         if (_currentStepIndex < _routeSteps.length - 1) {
           setState(() {
             _currentStepIndex++;
@@ -164,19 +332,17 @@ class MapSampleState extends State<MapSample> {
     });
   }
 
-  // ✨ NEW: Stops the location stream
   void _stopLocationUpdates() {
     _positionStreamSubscription?.cancel();
     _positionStreamSubscription = null;
   }
 
-  // ✨ NEW: Helper to remove HTML tags from instructions
   String _stripHtmlIfNeeded(String htmlString) {
     return htmlString.replaceAll(RegExp(r'<[^>]*>|&[^;]+;'), ' ');
   }
 
   Future<String> getRouteSummary(LatLng start, LatLng end) async {
-    var url = Uri.parse('https://rememberingly-unfrugal-lonna.ngrok-free.dev/api/routePlanner');
+    var url = Uri.parse('https://karena-colorational-phylicia.ngrok-free.dev/api/routePlanner');
     try {
       var response = await http.post(
         url,
@@ -364,16 +530,27 @@ class MapSampleState extends State<MapSample> {
           ),
           _buildTopUI(),
           if (_eta != null) _buildInfoCard(),
-          if (_isLoading) const Center(child: CircularProgressIndicator()),
+          if (_isLoading || _isNearbyLoading) const Center(child: CircularProgressIndicator()),
         ],
       ),
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 450.0), // Adjusted to make space for info card
+        padding: const EdgeInsets.only(bottom: 450.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // ✨ NEW: Button to launch AR view
+            // ✨ NEW: Button to show nearby places
+            FloatingActionButton(
+              onPressed: () async {
+                await _fetchNearbyPlaces(); // Fetch data first
+                _showNearbyPlacesBottomSheet(); // Then show the sheet
+              },
+              backgroundColor: Colors.teal,
+              foregroundColor: Colors.white,
+              heroTag: 'nearby_fab',
+              child: const Icon(Icons.attractions_outlined),
+            ),
+            const SizedBox(height: 16),
             if (_eta != null)
               FloatingActionButton(
                 onPressed: _launchARNavigator,
@@ -551,11 +728,11 @@ class MapSampleState extends State<MapSample> {
   }
 
   Future<void> _searchAndDrawRoute(String destination) async {
-    _stopLocationUpdates(); // ✨ Stop any existing AR updates
+    _stopLocationUpdates();
     setState(() {
       _messages.clear();
       _routeSummary = null;
-      _routeSteps.clear(); // ✨ Clear previous steps
+      _routeSteps.clear();
       _currentStepIndex = 0;
     });
 
@@ -589,10 +766,10 @@ class MapSampleState extends State<MapSample> {
             _markers.clear();
             _markers.add(Marker(markerId: const MarkerId("start"), position: LatLng(startLat, startLng), infoWindow: const InfoWindow(title: "Start")));
             _markers.add(Marker(markerId: const MarkerId("end"), position: points.last, infoWindow: InfoWindow(title: destination)));
-            _routeSteps = leg['steps']; // ✨ Store the steps for AR
+            _routeSteps = leg['steps'];
           });
 
-          _startLocationUpdates(); // ✨ Start sending AR data
+          _startLocationUpdates();
 
           final GoogleMapController controller = await _controller.future;
           controller.animateCamera(CameraUpdate.newLatLngBounds(_boundsFromLatLngList(points), 70));
