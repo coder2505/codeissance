@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'package:codeissance_project/profile_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -774,29 +775,47 @@ class MapSampleState extends State<MapSample> with WidgetsBindingObserver { // A
     );
   }
 
+// Make sure you have this import at the top of your file
+// import 'profile_screen.dart';
+
   Widget _buildSearchBarAndDeadline() {
     return Material(
-      elevation: 8, borderRadius: BorderRadius.circular(30),
+      elevation: 8,
+      borderRadius: BorderRadius.circular(30),
       child: Row(
         children: [
-          Expanded(child: TextField(
-            controller: _searchController,
-            onChanged: (value) {
-              if (value.isNotEmpty) { _getAutocomplete(value); }
-              else { setState(() { _suggestions = []; }); }
-            },
-            onSubmitted: (value) {
-              setState(() { _suggestions = []; });
-              _searchAndDrawRoute(value);
-            },
-            decoration: InputDecoration(
-              hintText: "Search destination",
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
-              filled: true, fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              onChanged: (value) {
+                if (value.isNotEmpty) {
+                  _getAutocomplete(value);
+                } else {
+                  setState(() {
+                    _suggestions = [];
+                  });
+                }
+              },
+              onSubmitted: (value) {
+                setState(() {
+                  _suggestions = [];
+                });
+                _searchAndDrawRoute(value);
+              },
+              decoration: InputDecoration(
+                hintText: "Search destination",
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding:
+                const EdgeInsets.symmetric(vertical: 15, horizontal: 20),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide.none,
+                ),
+              ),
             ),
-          )),
+          ),
           if (_deadline != null)
             Padding(
               padding: const EdgeInsets.only(right: 8.0),
@@ -807,8 +826,20 @@ class MapSampleState extends State<MapSample> with WidgetsBindingObserver { // A
               ),
             ),
           IconButton(
-            icon: Icon(Icons.alarm, color: _deadline != null ? Colors.blue : Colors.grey),
+            icon: Icon(Icons.alarm,
+                color: _deadline != null ? Colors.blue : Colors.grey),
             onPressed: () => _selectDeadline(context),
+          ),
+          // ✨ NEW: Settings Icon Button
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.grey),
+            onPressed: () {
+              // Navigates to the ProfileScreen when tapped
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ProfileScreen()),
+              );
+            },
           ),
           const SizedBox(width: 8),
         ],
