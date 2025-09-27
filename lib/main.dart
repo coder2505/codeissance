@@ -1,5 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -7,7 +11,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
+import 'package:rxdart/rxdart.dart';
 
+import 'firebase_options.dart';
 import 'http_util.dart';
 
 // A simple class to model a chat message
@@ -18,7 +24,19 @@ class ChatMessage {
   ChatMessage({required this.text, required this.isUser});
 }
 
-// ✨ NEW: A class to model a nearby place for easier handling
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+
+  if (kDebugMode) {
+    print("Handling a background message: ${message.messageId}");
+    print('Message data: ${message.data}');
+    print('Message notification: ${message.notification?.title}');
+    print('Message notification: ${message.notification?.body}');
+  }
+}
+
+
+// A class to model a nearby place for easier handling
 class NearbyPlace {
   final String name;
   final double lat;
@@ -36,7 +54,45 @@ class NearbyPlace {
 }
 
 
-void main() {
+void main() async{
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  final messaging = FirebaseMessaging.instance;
+
+  final settings = await messaging.requestPermission(
+    alert: true,
+    announcement: false,
+    badge: true,
+    carPlay: false,
+    criticalAlert: false,
+    provisional: false,
+    sound: true,
+  );
+
+  String? token = await messaging.getToken();
+
+  if (kDebugMode) {
+    print('Registration Token=$token');
+  }
+
+  final _messageStreamController = BehaviorSubject<RemoteMessage>();
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    if (kDebugMode) {
+      print('Handling a foreground message: ${message.messageId}');
+      print('Message data: ${message.data}');
+      print('Message notification: ${message.notification?.title}');
+      print('Message notification: ${message.notification?.body}');
+    }
+
+    _messageStreamController.sink.add(message);
+  });
+
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+
   runApp(const MaterialApp(
     debugShowCheckedModeBanner: false,
     home: MapSample(),
@@ -50,7 +106,7 @@ class MapSample extends StatefulWidget {
   State<MapSample> createState() => MapSampleState();
 }
 
-class MapSampleState extends State<MapSample> {
+class MapSampleState extends State<MapSample> with WidgetsBindingObserver { // Added WidgetsBindingObserver
   static const _arChannel = MethodChannel('ar_navigator_channel');
 
   final Completer<GoogleMapController> _controller =
@@ -80,10 +136,8 @@ class MapSampleState extends State<MapSample> {
   int _currentStepIndex = 0;
   StreamSubscription<Position>? _positionStreamSubscription;
 
-  // ✨ NEW: State variables for the nearby places feature
   Map<String, List<NearbyPlace>> _nearbyPlaces = {};
   bool _isNearbyLoading = false;
-
 
   // TODO: Add your Google Maps API key here
   final String _apiKey = "AIzaSyBAvUgw3DsmwlzJUXHQ693ClGK7jpsh4Fg"; // Replace with your key
@@ -94,8 +148,11 @@ class MapSampleState extends State<MapSample> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // Register the observer
+
     rootBundle.loadString('assets/map_style.json').then((string) {
       _mapStyle = string;
+      _updateMapStyle(); // Set initial style
     });
     _loadEventMarkers();
     _determinePosition();
@@ -103,17 +160,40 @@ class MapSampleState extends State<MapSample> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // Unregister the observer
     _stopLocationUpdates();
     super.dispose();
   }
 
-  // ✨ NEW: Fetches nearby places from your API
+  // This method is called when the system theme changes
+  @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    _updateMapStyle(); // Update the map style on theme change
+  }
+
+  // Helper method to set the style based on the current theme
+  Future<void> _updateMapStyle() async {
+    if (_controller.isCompleted) {
+      final controller = await _controller.future;
+      var brightness = View.of(context).platformDispatcher.platformBrightness;
+      bool isDarkMode = brightness == Brightness.dark;
+
+      if (isDarkMode && _mapStyle != null) {
+        controller.setMapStyle(_mapStyle);
+      } else {
+        controller.setMapStyle(null); // Reverts to default
+      }
+    }
+  }
+
+
   Future<void> _fetchNearbyPlaces() async {
     if (_currentLatLng == null) return;
 
     setState(() {
       _isNearbyLoading = true;
-      _nearbyPlaces.clear(); // Clear previous results
+      _nearbyPlaces.clear();
     });
 
     var url = Uri.parse('https://karena-colorational-phylicia.ngrok-free.dev/api/nearby-places');
@@ -122,7 +202,7 @@ class MapSampleState extends State<MapSample> {
         url,
         headers: {
           "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true", // Useful for local dev
+          "ngrok-skip-browser-warning": "true",
         },
         body: jsonEncode({
           'lat': _currentLatLng!.latitude.toString(),
@@ -165,9 +245,8 @@ class MapSampleState extends State<MapSample> {
     }
   }
 
-  // ✨ NEW: Shows the bottom sheet with nearby places data
-  // ✨ CORRECTED: Shows the bottom sheet with a working filter
-  void _showNearbyPlacesBottomSheet() {
+  // ✨ UPDATED: Now accepts an optional boolean to show ratings
+  void _showNearbyPlacesBottomSheet({bool showRatings = false}) {
     if (_isNearbyLoading) {
       showModalBottomSheet(
         context: context,
@@ -193,8 +272,6 @@ class MapSampleState extends State<MapSample> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        // ✨ FIX: State is declared here, outside of the StatefulBuilder's builder method.
-        // This allows its state to persist across rebuilds.
         String selectedCategory = _nearbyPlaces.keys.first;
 
         return StatefulBuilder(
@@ -205,12 +282,12 @@ class MapSampleState extends State<MapSample> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Nearby Places',
+                  Text(
+                    showRatings ? 'Places to explore' : 'Nearby Places',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
+                  Text('Based on your preferences', style: TextStyle(color: Colors.grey[600])),
                   const SizedBox(height: 16),
-                  // Category Chips
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
@@ -223,8 +300,6 @@ class MapSampleState extends State<MapSample> {
                             selected: selectedCategory == category,
                             onSelected: (isSelected) {
                               if (isSelected) {
-                                // This now correctly updates the 'selectedCategory'
-                                // variable declared in the outer scope.
                                 setModalState(() {
                                   selectedCategory = category;
                                 });
@@ -237,15 +312,21 @@ class MapSampleState extends State<MapSample> {
                     ),
                   ),
                   const Divider(height: 24),
-                  // Places List
                   Expanded(
                     child: ListView.builder(
                       itemCount: _nearbyPlaces[selectedCategory]?.length ?? 0,
                       itemBuilder: (context, index) {
                         final place = _nearbyPlaces[selectedCategory]![index];
+                        // ✨ Generate a random rating for each item
+                        final randomRating = Random().nextDouble() * 5;
+
                         return ListTile(
                           title: Text(place.name),
                           leading: const Icon(Icons.place_outlined, color: Colors.teal),
+                          // ✨ Conditionally show the rating as a subtitle
+                          subtitle: showRatings
+                              ? _buildRatingStars(randomRating)
+                              : null,
                           onTap: () {
                             Navigator.pop(context);
                             _searchController.text = place.name;
@@ -263,6 +344,29 @@ class MapSampleState extends State<MapSample> {
       },
     );
   }
+
+  Widget _buildRatingStars(double rating) {
+    List<Widget> stars = [];
+    for (int i = 1; i <= 5; i++) {
+      IconData icon;
+      if (i <= rating) {
+        icon = Icons.star;
+      } else if (i - 0.5 <= rating) {
+        icon = Icons.star_half;
+      } else {
+        icon = Icons.star_border;
+      }
+      stars.add(Icon(icon, color: Colors.amber, size: 18));
+    }
+    // Add the numerical rating at the end
+    stars.add(SizedBox(width: 8));
+    stars.add(Text(
+      rating.toStringAsFixed(1),
+      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+    ));
+    return Row(children: stars);
+  }
+
 
 
   Future<void> _launchARNavigator() async {
@@ -462,7 +566,7 @@ class MapSampleState extends State<MapSample> {
                   });
                   _chatController.clear();
 
-                  final receivedMessage = await postData(text, _currentLatLng!.latitude, _currentLatLng!.longitude);
+                  final receivedMessage = await postData(text, _currentLatLng!, _polylines.last.points.last);
 
                   setModalState(() {
                     _messages.add(ChatMessage(text: receivedMessage, isUser: false));
@@ -520,7 +624,7 @@ class MapSampleState extends State<MapSample> {
             trafficEnabled: true,
             onMapCreated: (GoogleMapController controller) {
               _controller.complete(controller);
-              controller.setMapStyle(_mapStyle);
+              _updateMapStyle(); // Use the helper method for initial style
             },
             polylines: _polylines,
             markers: _markers.union(_eventMarkers),
@@ -534,16 +638,15 @@ class MapSampleState extends State<MapSample> {
         ],
       ),
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 450.0),
+        padding: const EdgeInsets.only(bottom: 300.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // ✨ NEW: Button to show nearby places
             FloatingActionButton(
               onPressed: () async {
-                await _fetchNearbyPlaces(); // Fetch data first
-                _showNearbyPlacesBottomSheet(); // Then show the sheet
+                await _fetchNearbyPlaces();
+                _showNearbyPlacesBottomSheet();
               },
               backgroundColor: Colors.teal,
               foregroundColor: Colors.white,
@@ -592,9 +695,59 @@ class MapSampleState extends State<MapSample> {
           const SizedBox(height: 8),
           _buildGoalChips(),
           const SizedBox(height: 8),
+          _buildPresetButtons(), // ✨ ADDED PRESET BUTTONS
+          const SizedBox(height: 8),
           if (_suggestions.isNotEmpty) _buildAutocompleteList(),
         ],
       ),
+    );
+  }
+
+  // ✨ NEW: WIDGET FOR PRESET BUTTONS
+  Widget _buildPresetButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            icon: const Icon(Icons.work_outline),
+            label: const Text("Reach work"),
+            onPressed: () {
+              // TODO: Replace with your actual work address
+              _searchAndDrawRoute("Bandra Kurla Complex, Mumbai");
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black87,
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ElevatedButton.icon(
+            icon: const Icon(Icons.local_bar_outlined),
+            label: const Text("Evening out"),
+            onPressed: () async {
+              await _fetchNearbyPlaces();
+              _showNearbyPlacesBottomSheet(showRatings: true);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black87,
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -40,6 +40,8 @@ dependencies:
   geolocator: ^14.0.2
   intl: any
   flutter_markdown: ^0.7.1
+  firebase_messaging: ^16.0.2
+  rxdart: ^0.28.0
 
 dev_dependencies:
   flutter_test:

@@ -2,14 +2,14 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-Future<String> postData(String message, double latitude, double longitude) async {
+Future<String> postData(String message, LatLng start, LatLng end) async {
   var url = Uri.parse('https://karena-colorational-phylicia.ngrok-free.dev/api/citypulse');
 
   try {
     var response = await http.post(
       url,
       headers: {"Content-Type": "application/json"},
-      body: jsonEncode({'prompt': message, 'latitude': latitude, 'longitude': longitude}),
+      body: jsonEncode({'prompt': message, 'startLat': start.latitude.toString(), 'startLong': start.longitude.toString(), 'endLat': end.latitude.toString(), 'endLong': end.longitude.toString()}),
     );
 
     if (response.statusCode == 200) {
